@@ -8,7 +8,7 @@
 
 #define PI 3.1415926535f
 
-extern "C" void Motor_Task(void *argument)
+extern "C" void StartMotor_Task(void *argument)
 {
     // 1. 实例化 3508 电机 (接在 CAN1，ID 为 1)
     DJI_motor motor_3508(&hcan1, nullptr, 1, DJI_M3508, 0);

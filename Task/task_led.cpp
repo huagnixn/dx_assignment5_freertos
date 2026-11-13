@@ -5,7 +5,7 @@
 #include "cmsis_os.h"
 
 //  extern "C"，让 C 语言写的 freertos.c 能找到这个函数
-extern "C" void LED_Task(void *argument)
+extern "C" void StartLED_Task(void *argument)
 {
     // 初始化：先把红、绿、蓝三个灯全部熄灭（低电平熄灭）
     HAL_GPIO_WritePin(GPIOH, GPIO_PIN_10 | GPIO_PIN_11 | GPIO_PIN_12, GPIO_PIN_RESET);

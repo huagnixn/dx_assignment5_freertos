@@ -25,7 +25,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "spi.h"
+#include "bsp_dwt.h"
+#include "BMI088driver.h"
+#include "QuaternionEKF.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -50,36 +53,7 @@ typedef struct {
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-osThreadId_t LED_TaskHandle;
-const osThreadAttr_t LED_Task_attributes = {
-  .name = "LED_Task",
-  .stack_size = 128 * 4, // 堆栈大小512字节
-  .priority = (osPriority_t) osPriorityLow,
-};
-osThreadId_t IMU_TaskHandle;
-const osThreadAttr_t IMU_Task_attributes = {
-  .name = "IMU_Task",
-  .stack_size = 1024 * 4, //堆栈4096字节
-  .priority = (osPriority_t) osPriorityAboveNormal,
-};
-osThreadId_t Motor_TaskHandle;
-const osThreadAttr_t Motor_Task_attributes = {
-  .name = "Motor_Task",
-  .stack_size = 1024 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
-};
-osThreadId_t Power_TaskHandle;
-const osThreadAttr_t Power_Task_attributes = {
-  .name = "Power_Task",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-osThreadId_t RC_TaskHandle;
-const osThreadAttr_t RC_Task_attributes = {
-  .name = "RC_Task",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
+
 /* USER CODE END Variables */
 /* Definitions for CAN1_Sending_Service */
 osThreadId_t CAN1_Sending_ServiceHandle;
@@ -101,6 +75,41 @@ const osThreadAttr_t DJI_Motor_Service_attributes = {
   .name = "DJI_Motor_Service",
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityHigh,
+};
+/* Definitions for LED_Task */
+osThreadId_t LED_TaskHandle;
+const osThreadAttr_t LED_Task_attributes = {
+  .name = "LED_Task",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for IMU_Task */
+osThreadId_t IMU_TaskHandle;
+const osThreadAttr_t IMU_Task_attributes = {
+  .name = "IMU_Task",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for Motor_Task */
+osThreadId_t Motor_TaskHandle;
+const osThreadAttr_t Motor_Task_attributes = {
+  .name = "Motor_Task",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
+/* Definitions for Power_Task */
+osThreadId_t Power_TaskHandle;
+const osThreadAttr_t Power_Task_attributes = {
+  .name = "Power_Task",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for RC_Task */
+osThreadId_t RC_TaskHandle;
+const osThreadAttr_t RC_Task_attributes = {
+  .name = "RC_Task",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for can1_send_fifo */
 osMessageQueueId_t can1_send_fifoHandle;
@@ -125,16 +134,17 @@ const osSemaphoreAttr_t CAN2CountingSem_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-extern void LED_Task(void *argument);
-extern void IMU_Task(void *argument);
-extern void Motor_Task(void *argument);
-extern void Power_Task(void *argument);
-extern void RC_Task(void *argument);
+
 /* USER CODE END FunctionPrototypes */
 
 void can1_sending_service(void *argument);
 void can2_sending_service(void *argument);
 void DJI_motor_service(void *argument);
+void StartLED_Task(void *argument);
+void StartIMU_Task(void *argument);
+void StartMotor_Task(void *argument);
+void StartPower_Task(void *argument);
+void StartRC_Task(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -145,7 +155,13 @@ void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
   */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
+  DWT_Init(168);                 /* 168MHz，必须最先做，标定要用它计时 */
 
+  /* calibrate=1：上电静止实测零偏，最多阻塞 10s；不依赖 INFANTRY_ID 常数 */
+  BMI088_Init(&hspi1, 1);
+
+  /* 参数顺序：(Q1, Q2, R, lambda, 加速度低通系数)，先与例程一致 */
+  IMU_QuaternionEKF_Init(10.0f, 0.001f, 10000000.0f, 1.0f, 0.0f);
   /* USER CODE END Init */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -188,13 +204,24 @@ void MX_FREERTOS_Init(void) {
   /* creation of DJI_Motor_Service */
   DJI_Motor_ServiceHandle = osThreadNew(DJI_motor_service, NULL, &DJI_Motor_Service_attributes);
 
+  /* creation of LED_Task */
+  LED_TaskHandle = osThreadNew(StartLED_Task, NULL, &LED_Task_attributes);
+
+  /* creation of IMU_Task */
+  IMU_TaskHandle = osThreadNew(StartIMU_Task, NULL, &IMU_Task_attributes);
+
+  /* creation of Motor_Task */
+  Motor_TaskHandle = osThreadNew(StartMotor_Task, NULL, &Motor_Task_attributes);
+
+  /* creation of Power_Task */
+  Power_TaskHandle = osThreadNew(StartPower_Task, NULL, &Power_Task_attributes);
+
+  /* creation of RC_Task */
+  RC_TaskHandle = osThreadNew(StartRC_Task, NULL, &RC_Task_attributes);
+
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  LED_TaskHandle = osThreadNew(LED_Task, NULL, &LED_Task_attributes);
-  IMU_TaskHandle = osThreadNew(IMU_Task, NULL, &IMU_Task_attributes);
-  Motor_TaskHandle = osThreadNew(Motor_Task, NULL, &Motor_Task_attributes);
-  Power_TaskHandle = osThreadNew(Power_Task, NULL, &Power_Task_attributes);
-  RC_TaskHandle = osThreadNew(RC_Task, NULL, &RC_Task_attributes);
+  
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -255,6 +282,96 @@ __weak void DJI_motor_service(void *argument)
     osDelay(1);
   }
   /* USER CODE END DJI_motor_service */
+}
+
+/* USER CODE BEGIN Header_StartLED_Task */
+/**
+* @brief Function implementing the LED_Task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartLED_Task */
+__weak void StartLED_Task(void *argument)
+{
+  /* USER CODE BEGIN StartLED_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartLED_Task */
+}
+
+/* USER CODE BEGIN Header_StartIMU_Task */
+/**
+* @brief Function implementing the IMU_Task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartIMU_Task */
+__weak void StartIMU_Task(void *argument)
+{
+  /* USER CODE BEGIN StartIMU_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartIMU_Task */
+}
+
+/* USER CODE BEGIN Header_StartMotor_Task */
+/**
+* @brief Function implementing the Motor_Task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartMotor_Task */
+__weak void StartMotor_Task(void *argument)
+{
+  /* USER CODE BEGIN StartMotor_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartMotor_Task */
+}
+
+/* USER CODE BEGIN Header_StartPower_Task */
+/**
+* @brief Function implementing the Power_Task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartPower_Task */
+__weak void StartPower_Task(void *argument)
+{
+  /* USER CODE BEGIN StartPower_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartPower_Task */
+}
+
+/* USER CODE BEGIN Header_StartRC_Task */
+/**
+* @brief Function implementing the RC_Task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartRC_Task */
+__weak void StartRC_Task(void *argument)
+{
+  /* USER CODE BEGIN StartRC_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartRC_Task */
 }
 
 /* Private application code --------------------------------------------------*/

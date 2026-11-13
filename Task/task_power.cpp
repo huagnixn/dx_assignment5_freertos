@@ -26,7 +26,7 @@ void PowerMeter_Callback(can_device_receive *dev, uint8_t *data) {
     g_power_data.buffer_energy = raw_energy * 0.1f;
 }
 
-extern "C" void Power_Task(void *argument)
+extern "C" void StartPower_Task(void *argument)
 {
     // 3. 实例化接收对象
     // 参数依次为：CAN句柄，ID(0x31)，回调函数

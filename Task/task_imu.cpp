@@ -5,42 +5,49 @@
 #include "cmsis_os.h"
 #include "spi.h"
 
+//
+// task_imu.cpp
+//
+#include "main.h"
+#include "cmsis_os.h"
+#include "spi.h"
+
 extern "C" {
 #include "bsp_dwt.h"
 #include "BMI088driver.h"
 #include "QuaternionEKF.h"
 }
-// 声明外部变量
-extern float yaw, pitch, roll;
 
-extern "C" void IMU_Task(void *argument)
+/* 对外发布的姿态角，单位：度。其它任务用 extern 声明即可读取 */
+float yaw   = 0.0f;
+float pitch = 0.0f;
+float roll  = 0.0f;
+
+extern "C" void StartIMU_Task(void *argument)
 {
-    // 1. 初始化 DWT 计时器 (168MHz主频)
-    DWT_Init(168);
+    (void)argument;
 
-    // 2. 初始化 BMI088 传感器
-    // 传入 SPI1 句柄
-    BMI088_Init(&hspi1, 1);
-
-    // 3. 初始化四元数 EKF
-    IMU_QuaternionEKF_Init(10, 0.001f, 1000000, 0.9996f, 0.001f);
-
-    uint32_t last_time = DWT_GetTimeline_ms(); // 获取初始时间
+    /* 传感器和 EKF 已在 MX_FREERTOS_Init() 里初始化完毕，这里只做周期驱动 */
+    uint32_t last_cnt = 0;
+    DWT_GetDeltaT(&last_cnt);   /* 先空跑一次，把计数器对齐到"现在"，丢掉这段垃圾 dt */
 
     for (;;)
     {
-        // 4. 计算 dt（单位：秒）
-        // 去 bsp_dwt.h 看真实的函数名，通常是 DWT_GetDeltaT
-        float dt = DWT_GetDeltaT(&last_time);
+        float dt = DWT_GetDeltaT(&last_cnt);
 
-        // 5. 读取 BMI088 数据
-        BMI088_Read(&BMI088);
+        /* dt 合理性保护：首拍、调度抖动、断点调试会给出离谱值，直接跳过当拍 */
+        if (dt > 0.0f && dt < 0.02f)
+        {
+            BMI088_Read(&BMI088);
 
-        // 6. 更新姿态
-        IMU_QuaternionEKF_Update(BMI088.Gyro[0], BMI088.Gyro[1], BMI088.Gyro[2],
-                                 BMI088.Accel[0], BMI088.Accel[1], BMI088.Accel[2], dt);
+            IMU_QuaternionEKF_Update(BMI088.Gyro[0], BMI088.Gyro[1], BMI088.Gyro[2],
+                                     BMI088.Accel[0], BMI088.Accel[1], BMI088.Accel[2], dt);
 
-        // 7. 运行周期 1ms
+            yaw   = QEKF_INS.Yaw;
+            pitch = QEKF_INS.Pitch;
+            roll  = QEKF_INS.Roll;
+        }
+
         osDelay(1);
     }
 }

@@ -49,7 +49,7 @@ void DBUS_Decode(const uint8_t *buf, RC_Data_t *rc) {
 }
 
 // 任务入口
-extern "C" void RC_Task(void *argument)
+extern "C" void StartRC_Task(void *argument)
 {
     // 启动串口 DMA 接收
     HAL_UART_Receive_DMA(&huart1, dbus_rx_buffer, DBUS_BUFFER_SIZE);
